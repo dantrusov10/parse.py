@@ -3,7 +3,8 @@ import json
 import random
 from datetime import datetime
 
-GROQ_KEY = "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"
+VERCEL_URL = "https://newlevelcrm-landing.vercel.app/api/write"
+WRITER_SECRET = "newlevel2025"
 
 TOPICS = [
     ("IT-продажи", "Как увеличить конверсию в IT-продажах с помощью CRM"),
@@ -23,42 +24,6 @@ TOPICS = [
     ("Тендеры", "Тендерный отдел в IT-компании: когда создавать и как выстроить"),
 ]
 
-def generate_article(title, category):
-    prompt = f"""Напиши экспертную статью для блога CRM-системы NewLevel CRM.
-
-Тема: {title}
-Категория: {category}
-
-Требования:
-- Объём: 500-700 слов
-- Тон: профессиональный, практичный, без воды и канцелярита
-- Структура: короткое введение (2-3 предложения), 3-4 раздела с подзаголовками, конкретный вывод
-- Целевая аудитория: руководители IT-компаний, вендоры, системные интеграторы
-- Добавь конкретные цифры, примеры из практики
-- В финальном абзаце упомяни что NewLevel CRM помогает решить описанные задачи
-- Пиши живым языком, как опытный практик а не как ChatGPT
-
-Верни только текст статьи в формате HTML: используй <h3> для подзаголовков, <p> для абзацев, <strong> для выделений. Без вводных фраз."""
-
-    body = json.dumps({
-        "model": "llama-3.3-70b-versatile",
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 2000,
-        "temperature": 0.75
-    }).encode("utf-8")
-
-    req = urllib.request.Request(
-        "https://api.groq.com/openai/v1/chat/completions",
-        data=body,
-        headers={
-            "Authorization": f"Bearer {GROQ_KEY}",
-            "Content-Type": "application/json"
-        }
-    )
-    resp = urllib.request.urlopen(req, timeout=30)
-    result = json.loads(resp.read())
-    return result["choices"][0]["message"]["content"]
-
 def main():
     news_path = "/var/www/nwlvl/news.json"
 
@@ -77,7 +42,20 @@ def main():
     print(f"Генерируем: {title}")
 
     try:
-        content = generate_article(title, cat)
+        body = json.dumps({"topic": title, "category": cat, "secret": WRITER_SECRET}).encode("utf-8")
+        req = urllib.request.Request(
+            VERCEL_URL,
+            data=body,
+            headers={"Content-Type": "application/json"}
+        )
+        resp = urllib.request.urlopen(req, timeout=30)
+        result = json.loads(resp.read())
+        content = result.get("content", "")
+
+        if not content:
+            print("Ошибка: пустой ответ")
+            return
+
         print(f"Готово ({len(content)} символов)")
 
         excerpt = content.replace("<h3>","").replace("</h3>","").replace("<p>","").replace("</p>","").replace("<strong>","").replace("</strong>","")[:220] + "..."
