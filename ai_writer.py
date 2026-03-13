@@ -34,8 +34,9 @@ def get_gigachat_token():
         data=data,
         headers={
             "Authorization": f"Basic {GIGACHAT_KEY}",
-            "RqUID": "newlevel-crm-writer",
-            "Content-Type": "application/x-www-form-urlencoded"
+            "RqUID": "34479d11-8399-416c-914b-a4066b1b9764",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json"
         }
     )
     resp = urllib.request.urlopen(req, context=ctx, timeout=15)
