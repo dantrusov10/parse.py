@@ -32,6 +32,17 @@
 - PB_URL=https://cms-api.nwlvl.ru
 - NEWS_JSON_PATH=/var/www/nwlvl/news.json
 - ITEMS_PER_SOURCE=5
+- BLOG_PRERENDER_DIR=/var/www/nwlvl/blog
+- SITE_BASE_URL=https://nwlvl.ru
+
+Качество/релевантность:
+- В parse.py добавлен quality-filter (стоп-слова + минимальная длина заголовка/анонса)
+- Добавлен scoring релевантности для IT/B2B-тем (статьи сортируются по score перед upsert)
+- Нерелевантные и "шумные" новости отбрасываются до записи в CMS
+
+SSR/пререндер мета:
+- parse.py генерирует пререндер-файлы в BLOG_PRERENDER_DIR для /blog/<slug>/index.html
+- В пререндер пишутся title/description/robots/canonical и редирект на blog-post.html?slug=...
 
 Расширение источников:
 - Habr sales/crm/ai/ml/product/marketing/it_management/startup
