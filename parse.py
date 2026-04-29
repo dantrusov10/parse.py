@@ -3,6 +3,7 @@ import os
 import re
 import html
 import urllib.request
+import urllib.parse
 import xml.etree.ElementTree as ET
 from pb_client import get_token, upsert_article, fetch_all_articles
 
@@ -28,6 +29,10 @@ ITEMS_PER_SOURCE = int(os.getenv('ITEMS_PER_SOURCE', '5'))
 BLOG_PRERENDER_DIR = os.getenv('BLOG_PRERENDER_DIR', '/var/www/nwlvl/blog')
 SITE_BASE_URL = os.getenv('SITE_BASE_URL', 'https://nwlvl.ru')
 BLOG_SITEMAP_PATH = os.getenv('BLOG_SITEMAP_PATH', '/var/www/nwlvl/blog-sitemap.xml')
+PING_SITEMAP_URLS = os.getenv(
+    'PING_SITEMAP_URLS',
+    'https://yandex.ru/ping?sitemap={sitemap},https://www.google.com/ping?sitemap={sitemap}'
+)
 
 INCLUDE_KEYWORDS = [
     'crm', 'b2b', 'продаж', 'продажи', 'тендер', 'лид', 'воронк', 'ai',
@@ -204,11 +209,25 @@ def write_blog_sitemap(items):
         lines.append(f'    <loc>{html.escape(loc)}</loc>')
         if lastmod:
             lines.append(f'    <lastmod>{html.escape(lastmod)}</lastmod>')
+        lines.append('    <changefreq>daily</changefreq>')
+        lines.append('    <priority>0.8</priority>')
         lines.append('  </url>')
     lines.append('</urlset>')
     os.makedirs(os.path.dirname(BLOG_SITEMAP_PATH), exist_ok=True)
     with open(BLOG_SITEMAP_PATH, 'w', encoding='utf-8') as fp:
         fp.write('\n'.join(lines))
+
+
+def ping_search_engines(sitemap_url: str):
+    raw = [x.strip() for x in PING_SITEMAP_URLS.split(',') if x.strip()]
+    for endpoint in raw:
+        url = endpoint.replace('{sitemap}', urllib.parse.quote(sitemap_url, safe=':/?&=%'))
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                print('PING OK:', url, 'status=', resp.status)
+        except Exception as e:
+            print('PING WARN:', url, e)
 
 
 def main():
@@ -245,6 +264,8 @@ def main():
         write_news_json_snapshot(latest)
         write_prerender_pages(latest)
         write_blog_sitemap(latest)
+        ping_search_engines(f"{SITE_BASE_URL.rstrip('/')}/sitemap.xml")
+        ping_search_engines(f"{SITE_BASE_URL.rstrip('/')}/blog-sitemap.xml")
         print('news.json snapshot updated:', NEWS_JSON_PATH)
     except Exception as e:
         print('Snapshot error:', e)

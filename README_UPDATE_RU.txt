@@ -35,6 +35,7 @@
 - BLOG_PRERENDER_DIR=/var/www/nwlvl/blog
 - SITE_BASE_URL=https://nwlvl.ru
 - BLOG_SITEMAP_PATH=/var/www/nwlvl/blog-sitemap.xml
+- PING_SITEMAP_URLS=https://yandex.ru/ping?sitemap={sitemap},https://www.google.com/ping?sitemap={sitemap}
 
 Качество/релевантность:
 - В parse.py добавлен quality-filter (стоп-слова + минимальная длина заголовка/анонса)
@@ -45,6 +46,8 @@ SSR/пререндер мета:
 - parse.py генерирует пререндер-файлы в BLOG_PRERENDER_DIR для /blog/<slug>/index.html
 - В пререндер пишутся title/description/robots/canonical и редирект на blog-post.html?slug=...
 - parse.py генерирует blog-sitemap.xml со всеми slug статей
+- Для каждой записи blog-sitemap добавляет changefreq/priority
+- После обновления sitemap скрипт отправляет ping в поисковики (best effort)
 
 Расширение источников:
 - Habr sales/crm/ai/ml/product/marketing/it_management/startup
