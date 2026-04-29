@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import hashlib
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
@@ -36,6 +37,7 @@ def slugify(text: str, fallback: str = 'article') -> str:
 
 def slug_from_url(url: str, title: str = '') -> str:
     if url:
+        short_hash = hashlib.sha1(url.encode('utf-8')).hexdigest()[:10]
         patterns = [
             r'/articles/(\d+)',
             r'/news/line/(\d{4}-\d{2}-\d{2}_[a-z0-9_\-]+)',
@@ -45,10 +47,10 @@ def slug_from_url(url: str, title: str = '') -> str:
         for p in patterns:
             m = re.search(p, url)
             if m:
-                return slugify(f"imported-{m.group(1)}")
+                return slugify(f"imported-{m.group(1)}-{short_hash}")
         path = urllib.parse.urlparse(url).path.strip('/')
         if path:
-            return slugify(path.replace('/', '-'))
+            return slugify(f"{path.replace('/', '-')}-{short_hash}")
     return slugify(title)
 
 
@@ -108,6 +110,15 @@ def find_article_by_slug(slug: str, token: str = ''):
     return items[0] if items else None
 
 
+def find_article_by_url(url: str, token: str = ''):
+    if not url:
+        return None
+    flt = urllib.parse.quote(f'canonical_url="{url}"')
+    data = pb_request('GET', f'/api/collections/{PB_COLLECTION}/records?filter={flt}&perPage=1', token=token)
+    items = data.get('items', [])
+    return items[0] if items else None
+
+
 def build_article_payload(article: dict) -> dict:
     title = (article.get('title') or 'Без названия').strip()
     excerpt = (article.get('excerpt') or '').strip()
@@ -124,12 +135,15 @@ def build_article_payload(article: dict) -> dict:
         'robots': article.get('robots', 'index,follow'),
         'seo_title': (article.get('seo_title') or title)[:70],
         'seo_description': (article.get('seo_description') or excerpt)[:180],
+        'canonical_url': article.get('url', '') or article.get('canonical_url', ''),
     }
 
 
 def upsert_article(article: dict, token: str = ''):
     payload = build_article_payload(article)
-    existing = find_article_by_slug(payload['slug'], token=token)
+    existing = find_article_by_url(payload.get('canonical_url', ''), token=token)
+    if not existing:
+        existing = find_article_by_slug(payload['slug'], token=token)
     if existing:
         return pb_request('PATCH', f'/api/collections/{PB_COLLECTION}/records/{existing["id"]}', payload, token=token)
     return pb_request('POST', f'/api/collections/{PB_COLLECTION}/records', payload, token=token)
@@ -139,3 +153,18 @@ def fetch_latest_articles(limit: int = 100, token: str = ''):
     sort = urllib.parse.quote('-published_at')
     data = pb_request('GET', f'/api/collections/{PB_COLLECTION}/records?sort={sort}&perPage={limit}', token=token)
     return data.get('items', [])
+
+
+def fetch_all_articles(token: str = '', per_page: int = 200):
+    sort = urllib.parse.quote('-published_at')
+    page = 1
+    all_items = []
+    while True:
+        data = pb_request('GET', f'/api/collections/{PB_COLLECTION}/records?sort={sort}&perPage={per_page}&page={page}', token=token)
+        items = data.get('items', []) or []
+        all_items.extend(items)
+        total_pages = int(data.get('totalPages', 1) or 1)
+        if page >= total_pages or not items:
+            break
+        page += 1
+    return all_items

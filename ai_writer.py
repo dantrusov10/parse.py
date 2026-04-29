@@ -3,7 +3,7 @@ import os
 import random
 import urllib.request
 from datetime import datetime
-from pb_client import upsert_article, get_token, slugify, fetch_latest_articles
+from pb_client import upsert_article, get_token, slugify, fetch_latest_articles, fetch_all_articles
 
 VERCEL_URL = os.getenv('VERCEL_URL', 'https://newlevelcrm-landing.vercel.app/api/write')
 WRITER_SECRET = os.getenv('WRITER_SECRET', 'newlevel2025')
@@ -91,7 +91,7 @@ def main():
     print('PB OK:', saved.get('id'))
 
     try:
-        latest = fetch_latest_articles(limit=100, token=token)
+        latest = fetch_all_articles(token=token, per_page=200)
         write_news_json_snapshot(latest)
         print('news.json snapshot updated:', NEWS_JSON_PATH)
     except Exception as e:

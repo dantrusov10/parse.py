@@ -17,6 +17,12 @@
 
 Как запускать:
 - можно как раньше: python3 parse.py и python3 ai_writer.py
+- новый orchestrator: python3 blog_automation.py --mode hourly
+- ежедневная AI-статья: python3 blog_automation.py --mode daily-ai
+- единый daemon (парсинг каждый час + AI раз в день):
+  python3 blog_automation.py --mode daemon --ai-hour-utc 7
+- ручная публикация:
+  python3 blog_automation.py --mode manual --title "Заголовок" --content "<h3>...</h3><p>...</p>" --excerpt "Короткое описание"
 - если createRule в site_articles открыт, авторизация не обязательна
 - если createRule закрыт, задайте env:
   export PB_EMAIL='admin@example.com'

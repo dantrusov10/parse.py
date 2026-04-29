@@ -3,7 +3,7 @@ import os
 import re
 import urllib.request
 import xml.etree.ElementTree as ET
-from pb_client import get_token, upsert_article, fetch_latest_articles
+from pb_client import get_token, upsert_article, fetch_all_articles
 
 SOURCES = [
     ('https://habr.com/ru/rss/hub/sales/all/', 'Habr.com', 'IT-продажи'),
@@ -98,7 +98,7 @@ def main():
 
     # compatibility snapshot for current site until frontend is switched fully
     try:
-        latest = fetch_latest_articles(limit=100, token=token)
+        latest = fetch_all_articles(token=token, per_page=200)
         # enrich categories/source from parsed data by slug/url fallback is omitted for simplicity
         write_news_json_snapshot(latest)
         print('news.json snapshot updated:', NEWS_JSON_PATH)
