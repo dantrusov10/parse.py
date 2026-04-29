@@ -27,6 +27,7 @@ NEWS_JSON_PATH = os.getenv('NEWS_JSON_PATH', '/var/www/nwlvl/news.json')
 ITEMS_PER_SOURCE = int(os.getenv('ITEMS_PER_SOURCE', '5'))
 BLOG_PRERENDER_DIR = os.getenv('BLOG_PRERENDER_DIR', '/var/www/nwlvl/blog')
 SITE_BASE_URL = os.getenv('SITE_BASE_URL', 'https://nwlvl.ru')
+BLOG_SITEMAP_PATH = os.getenv('BLOG_SITEMAP_PATH', '/var/www/nwlvl/blog-sitemap.xml')
 
 INCLUDE_KEYWORDS = [
     'crm', 'b2b', 'продаж', 'продажи', 'тендер', 'лид', 'воронк', 'ai',
@@ -185,6 +186,31 @@ def write_prerender_pages(items):
             )
 
 
+def write_blog_sitemap(items):
+    if not BLOG_SITEMAP_PATH:
+        return
+    entries = []
+    for x in items:
+        slug = (x.get('slug') or '').strip()
+        if not slug:
+            continue
+        loc = f"{SITE_BASE_URL.rstrip('/')}/blog/{slug}"
+        lastmod = (x.get('updated') or x.get('published_at') or x.get('created') or '').strip()
+        entries.append((loc, lastmod))
+
+    lines = ['<?xml version="1.0" encoding="UTF-8"?>', '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
+    for loc, lastmod in entries:
+        lines.append('  <url>')
+        lines.append(f'    <loc>{html.escape(loc)}</loc>')
+        if lastmod:
+            lines.append(f'    <lastmod>{html.escape(lastmod)}</lastmod>')
+        lines.append('  </url>')
+    lines.append('</urlset>')
+    os.makedirs(os.path.dirname(BLOG_SITEMAP_PATH), exist_ok=True)
+    with open(BLOG_SITEMAP_PATH, 'w', encoding='utf-8') as fp:
+        fp.write('\n'.join(lines))
+
+
 def main():
     token = get_token()
     seen = set()
@@ -218,6 +244,7 @@ def main():
         latest = fetch_all_articles(token=token, per_page=200)
         write_news_json_snapshot(latest)
         write_prerender_pages(latest)
+        write_blog_sitemap(latest)
         print('news.json snapshot updated:', NEWS_JSON_PATH)
     except Exception as e:
         print('Snapshot error:', e)
