@@ -43,6 +43,45 @@ def strip_html(text: str) -> str:
     return re.sub('<[^>]+>', '', text or '')
 
 
+def normalize_whitespace(text: str) -> str:
+    return re.sub(r'\s+', ' ', (text or '')).strip()
+
+
+def extract_rss_content_html(item) -> str:
+    # Try content:encoded first (most RSS feeds keep longer article body there).
+    content_node = item.find('{http://purl.org/rss/1.0/modules/content/}encoded')
+    if content_node is not None and (content_node.text or '').strip():
+        return content_node.text or ''
+    # Fallback to description text
+    return item.findtext('description', '') or ''
+
+
+def build_body_from_rss(item) -> str:
+    raw_html = extract_rss_content_html(item)
+    text = strip_html(html.unescape(raw_html))
+    text = normalize_whitespace(text)
+    if not text:
+        return ''
+    # Keep more material for internal blog pages, but avoid huge blobs.
+    text = text[:6000]
+    parts = [x.strip() for x in re.split(r'(?<=[.!?])\s+', text) if x.strip()]
+    chunks = []
+    buf = []
+    cur_len = 0
+    for p in parts:
+        if cur_len + len(p) > 700 and buf:
+            chunks.append(' '.join(buf))
+            buf = [p]
+            cur_len = len(p)
+        else:
+            buf.append(p)
+            cur_len += len(p) + 1
+    if buf:
+        chunks.append(' '.join(buf))
+    chunks = chunks[:8]
+    return ''.join(f'<p>{html.escape(c)}</p>' for c in chunks)
+
+
 def parse_feed(url, src, cat):
     out = []
     req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -51,13 +90,18 @@ def parse_feed(url, src, cat):
     for item in root.findall('.//item')[:ITEMS_PER_SOURCE]:
         title = (item.findtext('title', '') or '').strip()
         link = (item.findtext('link', '') or '').strip()
-        desc = strip_html(item.findtext('description', ''))[:220].strip()
+        full_text = normalize_whitespace(strip_html(item.findtext('description', '')))
+        desc = full_text[:380].strip()
+        if len(full_text) > 380:
+            desc += '…'
+        body = build_body_from_rss(item)
         date = (item.findtext('pubDate', '') or '').strip()
         if title and link:
             out.append({
                 'title': title,
                 'url': link,
                 'excerpt': desc,
+                'body': body,
                 'date': date,
                 'src': src,
                 'cat': cat,
