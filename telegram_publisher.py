@@ -8,6 +8,7 @@ import re
 import time
 import html as html_lib
 import urllib.parse
+import urllib.error
 import urllib.request
 from datetime import datetime
 
@@ -23,7 +24,7 @@ ENABLE_IMAGES = os.getenv("TG_ENABLE_IMAGES", "1").strip().lower() not in ("0", 
 
 IMG_PROVIDER = os.getenv("IMG_PROVIDER", "").strip().lower()
 IMG_API_KEY = os.getenv("IMG_API_KEY", "").strip()
-IMG_MODEL = os.getenv("IMG_MODEL", "openai/gpt-image-1").strip()
+IMG_MODEL = os.getenv("IMG_MODEL", "google/gemini-2.5-flash-image").strip()
 IMG_FALLBACK_MODELS = [x.strip() for x in os.getenv("IMG_FALLBACK_MODELS", "").split(",") if x.strip()]
 IMG_SIZE = os.getenv("IMG_SIZE", "1536x1024").strip()
 IMG_STRICT_OPENROUTER = os.getenv("IMG_STRICT_OPENROUTER", "0").strip().lower() in ("1", "true", "yes")
@@ -284,8 +285,13 @@ def _openrouter_generate_image(article: dict) -> str:
     prompt = _image_prompt(article)
     for model in models:
         try:
-            url = "https://openrouter.ai/api/v1/images/generations"
-            payload = {"model": model, "prompt": prompt, "size": IMG_SIZE}
+            # OpenRouter image generation works via chat completions + image modality.
+            url = "https://openrouter.ai/api/v1/chat/completions"
+            payload = {
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "modalities": ["image", "text"],
+            }
             req = urllib.request.Request(
                 url,
                 data=json.dumps(payload).encode("utf-8"),
@@ -298,23 +304,34 @@ def _openrouter_generate_image(article: dict) -> str:
                 },
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                raw = resp.read().decode("utf-8")
-            if raw.lstrip().lower().startswith("<!doctype html"):
-                # OpenRouter account/endpoint returned web app HTML instead of JSON API.
-                return ""
+            with urllib.request.urlopen(req, timeout=80) as resp:
+                raw = resp.read().decode("utf-8", "ignore")
             data = json.loads(raw or "{}")
-            arr = data.get("data") or []
-            if not arr:
+            msg = ((data.get("choices") or [{}])[0].get("message") or {})
+            images = msg.get("images") or []
+            if not images:
                 continue
-            if arr[0].get("url"):
-                return arr[0]["url"]
-            if arr[0].get("b64_json"):
-                img_bytes = base64.b64decode(arr[0]["b64_json"])
+            image_url = ((images[0].get("image_url") or {}).get("url") or "").strip()
+            # Most image-capable models return data URL (base64 PNG).
+            if image_url.startswith("data:image") and ";base64," in image_url:
+                b64 = image_url.split(";base64,", 1)[1]
+                img_bytes = base64.b64decode(b64)
                 file_name = f"/var/tmp/newlevel_tg_img_{int(time.time())}.png"
                 with open(file_name, "wb") as f:
                     f.write(img_bytes)
                 return file_name
+            if image_url.startswith("http://") or image_url.startswith("https://"):
+                return image_url
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8", "ignore")
+            # Known non-recoverable cases for this model; try next fallback model silently.
+            if (
+                "not a valid model id" in body.lower()
+                or "no endpoints found" in body.lower()
+                or "unsupported_country_region_territory" in body.lower()
+            ):
+                continue
+            print(f"IMG WARN ({model}): HTTP {e.code} {body[:220]}")
         except Exception as e:
             print(f"IMG WARN ({model}):", e)
             continue
@@ -351,6 +368,14 @@ def _send_photo(caption: str, image_url_or_path: str):
     # Telegram Bot API sendPhoto in multipart mode for bytes is harder in stdlib;
     # use URL mode first, fallback to text post if unsupported.
     if image_url_or_path.startswith("http://") or image_url_or_path.startswith("https://"):
+        if TG_RELAY_URL and TG_RELAY_SECRET:
+            payload = {
+                "chat_id": _normalize_channel(TELEGRAM_CHANNEL),
+                "image_url": image_url_or_path,
+                "caption": caption,
+                "parse_mode": "HTML",
+            }
+            return _tg_api("sendPhotoByUrl", payload)
         payload = {
             "chat_id": _normalize_channel(TELEGRAM_CHANNEL),
             "photo": image_url_or_path,
@@ -358,6 +383,16 @@ def _send_photo(caption: str, image_url_or_path: str):
             "parse_mode": "HTML",
         }
         return _tg_api("sendPhoto", payload)
+    if TG_RELAY_URL and TG_RELAY_SECRET and os.path.exists(image_url_or_path):
+        with open(image_url_or_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("ascii")
+        payload = {
+            "chat_id": _normalize_channel(TELEGRAM_CHANNEL),
+            "image_base64": b64,
+            "caption": caption,
+            "parse_mode": "HTML",
+        }
+        return _tg_api("sendPhotoBase64", payload)
     return None
 
 
