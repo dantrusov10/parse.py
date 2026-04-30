@@ -10,6 +10,8 @@ from datetime import datetime
 
 TELEGRAM_BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 TELEGRAM_CHANNEL = os.getenv("CHANNEL", "").strip()
+TG_RELAY_URL = os.getenv("TG_RELAY_URL", "").strip()
+TG_RELAY_SECRET = os.getenv("TG_RELAY_SECRET", "").strip()
 POST_LIMIT_RAW = os.getenv("POST_LIMIT", "20/day").strip().lower()
 MIN_SCORE = int(os.getenv("MIN_SCORE", "6"))
 STYLE = os.getenv("STYLE", "Коротко, по делу.").strip()
@@ -86,6 +88,28 @@ def _mark_sent(key: str):
 
 
 def _tg_api(method: str, payload: dict):
+    if TG_RELAY_URL and TG_RELAY_SECRET:
+        req = urllib.request.Request(
+            TG_RELAY_URL,
+            data=json.dumps(
+                {
+                    "secret": TG_RELAY_SECRET,
+                    "method": method,
+                    "payload": payload,
+                    "botToken": TELEGRAM_BOT_TOKEN,
+                },
+                ensure_ascii=False,
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read().decode("utf-8")
+        data = json.loads(raw or "{}")
+        if not data.get("ok"):
+            raise RuntimeError(f"Telegram relay error ({method}): {data}")
+        return data
+
     token = TELEGRAM_BOT_TOKEN
     url = f"https://api.telegram.org/bot{token}/{method}"
     req = urllib.request.Request(
