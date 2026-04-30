@@ -157,7 +157,7 @@ def _build_caption(article: dict, for_photo: bool = False) -> str:
     excerpt = re.sub(r"\s+", " ", excerpt).strip()
     src = (article.get("src") or "Источник").strip()
     cat = (article.get("cat") or "IT-продажи").strip()
-    excerpt_limit = 180 if for_photo else 360
+    excerpt_limit = 120 if for_photo else 360
     excerpt = _shorten(excerpt, excerpt_limit)
     commentary = _ai_editor_comment(article) or _editor_comment(article)
     opener = _editor_opener(article)
@@ -169,10 +169,11 @@ def _build_caption(article: dict, for_photo: bool = False) -> str:
     cat = html_lib.escape(cat)
     commentary = html_lib.escape(commentary)
     read_more_url = html_lib.escape(read_more_url)
-    def _compose(curr_excerpt: str, curr_commentary: str) -> str:
+    def _compose(curr_excerpt: str, curr_commentary: str, curr_title: str, include_opener: bool = True) -> str:
+        head = f"{opener}\n" if include_opener else ""
         return (
-            f"{opener}\n"
-            f"<b>{title}</b>\n\n"
+            f"{head}"
+            f"<b>{curr_title}</b>\n\n"
             f"{curr_excerpt}\n\n"
             f"<b>Категория:</b> {cat}\n"
             f"<b>Источник:</b> {src}\n\n"
@@ -180,21 +181,31 @@ def _build_caption(article: dict, for_photo: bool = False) -> str:
             f"Читать полностью: {read_more_url}"
         )
 
-    caption = _compose(excerpt, commentary)
+    caption = _compose(excerpt, commentary, title, include_opener=True)
     if for_photo:
         # Telegram caption for photo is limited (about 1024 chars). Keep safe margin.
         max_caption_len = 980
+        # For photo captions keep more room for the team commentary.
+        title_photo = _shorten(title, 96)
+        excerpt_photo = _shorten(excerpt, 60)
+        caption = _compose(excerpt_photo, commentary, title_photo, include_opener=True)
         if len(caption) > max_caption_len:
-            # First trim excerpt to preserve the team's commentary.
-            excerpt = _shorten(excerpt, 110)
-            caption = _compose(excerpt, commentary)
+            # Drop excerpt entirely first, preserving commentary.
+            caption = _compose("", commentary, title_photo, include_opener=True)
         if len(caption) > max_caption_len:
-            overflow = len(caption) - max_caption_len
-            # Trim commentary only if still needed, keeping useful minimum length.
-            min_comment_len = 120
-            new_len = max(min_comment_len, len(commentary) - overflow - 2)
-            commentary = _shorten(commentary, new_len)
-            caption = _compose(excerpt, commentary)
+            # Then remove opener and trim title harder, still preserving commentary.
+            title_photo = _shorten(title_photo, 64)
+            caption = _compose("", commentary, title_photo, include_opener=False)
+        if len(caption) > max_caption_len:
+            # Last resort: shorten link fragment, not the commentary.
+            short_url = _shorten(read_more_url, 120)
+            caption = (
+                f"<b>{title_photo}</b>\n\n"
+                f"<b>Категория:</b> {cat}\n"
+                f"<b>Источник:</b> {src}\n\n"
+                f"<b>Комментарий от команды NewLevel:</b> {commentary}\n\n"
+                f"Читать полностью: {short_url}"
+            )
     return caption
 
 
