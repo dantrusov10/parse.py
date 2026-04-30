@@ -145,6 +145,12 @@ def _tg_api(method: str, payload: dict):
 
 
 def _build_caption(article: dict, for_photo: bool = False) -> str:
+    def _shorten(text: str, limit: int) -> str:
+        text = (text or "").strip()
+        if len(text) <= limit:
+            return text
+        return text[:limit].rstrip(" ,.;:") + "…"
+
     title = (article.get("title") or "Без заголовка").strip()
     excerpt = (article.get("excerpt") or "").strip()
     excerpt = html_lib.unescape(excerpt).replace("\xa0", " ")
@@ -152,10 +158,8 @@ def _build_caption(article: dict, for_photo: bool = False) -> str:
     src = (article.get("src") or "Источник").strip()
     cat = (article.get("cat") or "IT-продажи").strip()
     excerpt_limit = 180 if for_photo else 360
-    excerpt = excerpt[:excerpt_limit] + ("…" if len(excerpt) > excerpt_limit else "")
+    excerpt = _shorten(excerpt, excerpt_limit)
     commentary = _ai_editor_comment(article) or _editor_comment(article)
-    if for_photo and len(commentary) > 140:
-        commentary = commentary[:140].rstrip(" ,.;:") + "…"
     opener = _editor_opener(article)
     read_more_url = (article.get("url") or "").strip()
     opener = html_lib.escape(opener)
@@ -165,15 +169,33 @@ def _build_caption(article: dict, for_photo: bool = False) -> str:
     cat = html_lib.escape(cat)
     commentary = html_lib.escape(commentary)
     read_more_url = html_lib.escape(read_more_url)
-    return (
-        f"{opener}\n"
-        f"<b>{title}</b>\n\n"
-        f"{excerpt}\n\n"
-        f"<b>Категория:</b> {cat}\n"
-        f"<b>Источник:</b> {src}\n\n"
-        f"<b>Комментарий от команды NewLevel:</b> {commentary}\n\n"
-        f"Читать полностью: {read_more_url}"
-    )
+    def _compose(curr_excerpt: str, curr_commentary: str) -> str:
+        return (
+            f"{opener}\n"
+            f"<b>{title}</b>\n\n"
+            f"{curr_excerpt}\n\n"
+            f"<b>Категория:</b> {cat}\n"
+            f"<b>Источник:</b> {src}\n\n"
+            f"<b>Комментарий от команды NewLevel:</b> {curr_commentary}\n\n"
+            f"Читать полностью: {read_more_url}"
+        )
+
+    caption = _compose(excerpt, commentary)
+    if for_photo:
+        # Telegram caption for photo is limited (about 1024 chars). Keep safe margin.
+        max_caption_len = 980
+        if len(caption) > max_caption_len:
+            # First trim excerpt to preserve the team's commentary.
+            excerpt = _shorten(excerpt, 110)
+            caption = _compose(excerpt, commentary)
+        if len(caption) > max_caption_len:
+            overflow = len(caption) - max_caption_len
+            # Trim commentary only if still needed, keeping useful minimum length.
+            min_comment_len = 120
+            new_len = max(min_comment_len, len(commentary) - overflow - 2)
+            commentary = _shorten(commentary, new_len)
+            caption = _compose(excerpt, commentary)
+    return caption
 
 
 def _editor_opener(article: dict) -> str:
