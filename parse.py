@@ -5,7 +5,7 @@ import html
 import urllib.request
 import urllib.parse
 import xml.etree.ElementTree as ET
-from pb_client import get_token, upsert_article, fetch_all_articles
+from pb_client import get_token, upsert_article, fetch_all_articles, prune_old_imported_articles
 from telegram_publisher import publish_article
 
 SOURCES = [
@@ -33,6 +33,7 @@ PING_SITEMAP_URLS = os.getenv(
     'PING_SITEMAP_URLS',
     'https://yandex.ru/ping?sitemap={sitemap},https://www.google.com/ping?sitemap={sitemap}'
 )
+RETENTION_DAYS = int(os.getenv('ARTICLE_RETENTION_DAYS', '180'))
 
 INCLUDE_KEYWORDS = [
     'crm', 'b2b', 'продаж', 'продажи', 'тендер', 'лид', 'воронк', 'ai',
@@ -359,6 +360,9 @@ def main():
 
     # compatibility snapshot for current site until frontend is switched fully
     try:
+        pruned = prune_old_imported_articles(token=token, older_than_days=RETENTION_DAYS, max_delete=500)
+        if pruned:
+            print('PB retention cleanup:', pruned, 'old imported articles removed')
         latest = fetch_all_articles(token=token, per_page=200)
         write_news_json_snapshot(latest)
         write_prerender_pages(latest)

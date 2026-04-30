@@ -202,3 +202,37 @@ def fetch_all_articles(token: str = '', per_page: int = 200):
             break
         page += 1
     return all_items
+
+
+def prune_old_imported_articles(token: str = '', older_than_days: int = 180, max_delete: int = 500):
+    now = datetime.now(timezone.utc)
+    try:
+        days = int(older_than_days)
+    except Exception:
+        days = 180
+    cutoff_ts = now.timestamp() - (max(1, days) * 86400)
+    deleted = 0
+    items = fetch_all_articles(token=token, per_page=200)
+    for item in items:
+        if deleted >= max_delete:
+            break
+        slug = (item.get('slug') or '').strip().lower()
+        if not slug.startswith('imported-'):
+            continue
+        dt_raw = (item.get('published_at') or item.get('created') or '').strip()
+        if not dt_raw:
+            continue
+        try:
+            dt = datetime.fromisoformat(dt_raw.replace('Z', '+00:00'))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            continue
+        if dt.timestamp() >= cutoff_ts:
+            continue
+        try:
+            pb_request('DELETE', f'/api/collections/{PB_COLLECTION}/records/{item["id"]}', token=token)
+            deleted += 1
+        except Exception as e:
+            print('PB prune warning:', item.get('id'), e)
+    return deleted
