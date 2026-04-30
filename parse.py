@@ -45,6 +45,15 @@ EXCLUDE_KEYWORDS = [
     'звезд', 'шоубиз', 'гороскоп', 'дтп', 'убийств', 'войн', 'ракет',
     'обстрел', 'нхл', 'футбол', 'хоккей', 'пожар', 'землетряс', 'криминал'
 ]
+BLOCKED_TERMS = [
+    x.strip().lower()
+    for x in os.getenv(
+        'BLOCKED_TERMS',
+        'украин,ркн,роскомнадзор,сво,спецоперац,войн,боев,убийств,убил,погиб,погибл,'
+        'тюрьм,посадили,осужден,осудили,арест,задержан,задержали,приговор,срок лишения'
+    ).split(',')
+    if x.strip()
+]
 
 CATEGORY_RULES = {
     'Тендеры': {
@@ -111,6 +120,13 @@ def strip_html(text: str) -> str:
 
 def normalize_whitespace(text: str) -> str:
     return re.sub(r'\s+', ' ', (text or '')).strip()
+
+
+def has_blocked_terms(*parts: str) -> bool:
+    text = ' '.join([normalize_whitespace(strip_html(p or '')).lower() for p in parts if p is not None])
+    if not text:
+        return False
+    return any(term in text for term in BLOCKED_TERMS)
 
 
 def extract_rss_content_html(item) -> str:
@@ -222,9 +238,12 @@ def recategorize_article(article: dict, fallback_cat: str) -> str:
 def is_quality_article(article: dict) -> bool:
     title = (article.get('title') or '').strip()
     excerpt = (article.get('excerpt') or '').strip()
+    body = (article.get('body') or article.get('content') or '').strip()
     if len(title) < 18:
         return False
     if len(excerpt) < 40:
+        return False
+    if has_blocked_terms(title, excerpt, body):
         return False
     return calc_relevance_score(article) >= 2
 
@@ -234,20 +253,25 @@ def write_news_json_snapshot(items):
         return
     simplified = []
     for x in items:
+        title = x.get('title') or ''
+        excerpt = x.get('excerpt') or ''
+        body = x.get('content') or x.get('body') or ''
+        if has_blocked_terms(title, excerpt, body):
+            continue
         fallback_cat = x.get('cat') or 'IT-продажи'
         computed_cat = recategorize_article({
-            'title': x.get('title') or '',
-            'excerpt': x.get('excerpt') or '',
-            'body': x.get('content') or x.get('body') or '',
+            'title': title,
+            'excerpt': excerpt,
+            'body': body,
         }, fallback_cat)
         simplified.append({
-            'title': x.get('title'),
+            'title': title,
             'url': x.get('url'),
-            'excerpt': x.get('excerpt'),
+            'excerpt': excerpt,
             'date': x.get('published_at') or x.get('date'),
             'src': x.get('src', 'NewLevel CRM'),
             'cat': computed_cat,
-            'body': x.get('content') or x.get('body'),
+            'body': body,
         })
     os.makedirs(os.path.dirname(NEWS_JSON_PATH), exist_ok=True)
     with open(NEWS_JSON_PATH, 'w', encoding='utf-8') as f:
