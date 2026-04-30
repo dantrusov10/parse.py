@@ -27,6 +27,10 @@ IMG_MODEL = os.getenv("IMG_MODEL", "openai/gpt-image-1").strip()
 IMG_FALLBACK_MODELS = [x.strip() for x in os.getenv("IMG_FALLBACK_MODELS", "").split(",") if x.strip()]
 IMG_SIZE = os.getenv("IMG_SIZE", "1536x1024").strip()
 IMG_STRICT_OPENROUTER = os.getenv("IMG_STRICT_OPENROUTER", "0").strip().lower() in ("1", "true", "yes")
+AI_COMMENT_ENABLED = os.getenv("TG_AI_COMMENT_ENABLED", "1").strip().lower() not in ("0", "false", "no")
+AI_COMMENT_MODEL = os.getenv("TG_AI_COMMENT_MODEL", "openai/gpt-4o-mini").strip()
+AI_COMMENT_MAX_CHARS = int(os.getenv("TG_AI_COMMENT_MAX_CHARS", "220"))
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip() or IMG_API_KEY
 
 SENT_STORE = os.getenv("TELEGRAM_SENT_STORE", "/var/tmp/newlevel_tg_sent.json")
 DAILY_STORE = os.getenv("TELEGRAM_DAILY_STORE", "/var/tmp/newlevel_tg_daily.json")
@@ -147,7 +151,7 @@ def _build_caption(article: dict) -> str:
     src = (article.get("src") or "Источник").strip()
     cat = (article.get("cat") or "IT-продажи").strip()
     excerpt = excerpt[:360] + ("…" if len(excerpt) > 360 else "")
-    commentary = _editor_comment(article)
+    commentary = _ai_editor_comment(article) or _editor_comment(article)
     opener = _editor_opener(article)
     read_more_url = (article.get("url") or "").strip()
     return (
@@ -185,6 +189,71 @@ def _editor_comment(article: dict) -> str:
     if "crm" in title or "продаж" in title:
         return "ищите, как эта практика сократит цикл сделки и повысит предсказуемость воронки."
     return "разберите, как это применить в вашем процессе уже на этой неделе и какой KPI это должно улучшить."
+
+
+def _ai_editor_comment(article: dict) -> str:
+    if not AI_COMMENT_ENABLED or not OPENROUTER_API_KEY:
+        return ""
+    title = (article.get("title") or "").strip()
+    excerpt = (article.get("excerpt") or "").strip()
+    cat = (article.get("cat") or "IT-продажи").strip()
+    src = (article.get("src") or "Источник").strip()
+    if not title:
+        return ""
+
+    system = (
+        "Ты редактор Telegram-канала NewLevel AI. "
+        "Пиши от лица команды NewLevel AI. "
+        "Нужен короткий практический вывод по статье: 1-2 предложения, живой язык, без канцелярита, без списков. "
+        f"Максимум {AI_COMMENT_MAX_CHARS} символов."
+    )
+    user = (
+        f"Категория: {cat}\n"
+        f"Источник: {src}\n"
+        f"Заголовок: {title}\n"
+        f"Анонс: {excerpt[:340]}\n\n"
+        "Сформулируй блок для подписи: 'что это значит на практике' для бизнеса."
+    )
+    payload = {
+        "model": AI_COMMENT_MODEL,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "temperature": 0.45,
+        "max_tokens": 140,
+    }
+    req = urllib.request.Request(
+        "https://openrouter.ai/api/v1/chat/completions",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "HTTP-Referer": "https://nwlvl.ru",
+            "X-Title": "NewLevel CRM News Bot",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=35) as resp:
+            raw = resp.read().decode("utf-8")
+        data = json.loads(raw or "{}")
+        content = (
+            (data.get("choices") or [{}])[0]
+            .get("message", {})
+            .get("content", "")
+            .strip()
+        )
+        content = re.sub(r"\s+", " ", content).strip(" -\n\t")
+        if not content:
+            return ""
+        if len(content) > AI_COMMENT_MAX_CHARS:
+            content = content[:AI_COMMENT_MAX_CHARS].rstrip(" ,.;:") + "…"
+        return content
+    except Exception as e:
+        print("AI COMMENT WARN:", e)
+        return ""
 
 
 def _image_prompt(article: dict) -> str:
