@@ -149,13 +149,15 @@ def _build_caption(article: dict) -> str:
     excerpt = excerpt[:360] + ("…" if len(excerpt) > 360 else "")
     commentary = _editor_comment(article)
     opener = _editor_opener(article)
+    read_more_url = (article.get("url") or "").strip()
     return (
         f"{opener}\n"
         f"<b>{title}</b>\n\n"
         f"{excerpt}\n\n"
         f"<b>Категория:</b> {cat}\n"
         f"<b>Источник:</b> {src}\n\n"
-        f"<b>Что это значит на практике:</b> {commentary}"
+        f"<b>Что это значит на практике:</b> {commentary}\n\n"
+        f"Читать полностью: {read_more_url}"
     )
 
 
@@ -263,7 +265,7 @@ def _read_url_or_path_data(url_or_path: str):
         return f.read()
 
 
-def _send_photo_with_button(caption: str, image_url_or_path: str, read_more_url: str):
+def _send_photo(caption: str, image_url_or_path: str):
     # Telegram Bot API sendPhoto in multipart mode for bytes is harder in stdlib;
     # use URL mode first, fallback to text post if unsupported.
     if image_url_or_path.startswith("http://") or image_url_or_path.startswith("https://"):
@@ -272,9 +274,6 @@ def _send_photo_with_button(caption: str, image_url_or_path: str, read_more_url:
             "photo": image_url_or_path,
             "caption": caption,
             "parse_mode": "HTML",
-            "reply_markup": {
-                "inline_keyboard": [[{"text": "Читать полностью", "url": read_more_url}]]
-            },
         }
         return _tg_api("sendPhoto", payload)
     return None
@@ -347,7 +346,7 @@ def publish_article(article: dict, relevance_score: int = 0):
     sent = False
     try:
         if img:
-            res = _send_photo_with_button(caption, img, url)
+            res = _send_photo(caption, img)
             sent = bool(res and res.get("ok"))
         if not sent:
             _tg_api(
@@ -356,9 +355,6 @@ def publish_article(article: dict, relevance_score: int = 0):
                     "chat_id": _normalize_channel(TELEGRAM_CHANNEL),
                     "text": caption,
                     "parse_mode": "HTML",
-                    "reply_markup": {
-                        "inline_keyboard": [[{"text": "Читать полностью", "url": url}]]
-                    },
                     "disable_web_page_preview": False,
                 },
             )
@@ -376,16 +372,13 @@ def publish_manual_post(title: str, text: str, url: str = ""):
     if not _is_configured():
         raise RuntimeError("Telegram env is not configured")
     base = f"<b>{title.strip()}</b>\n\n{text.strip()}\n\n<i>{STYLE}</i>"
-    markup = None
     if url:
-        markup = {"inline_keyboard": [[{"text": "Читать полностью", "url": url.strip()}]]}
+        base += f"\n\nЧитать полностью: {url.strip()}"
     payload = {
         "chat_id": _normalize_channel(TELEGRAM_CHANNEL),
         "text": base,
         "parse_mode": "HTML",
         "disable_web_page_preview": False,
     }
-    if markup:
-        payload["reply_markup"] = markup
     return _tg_api("sendMessage", payload)
 
