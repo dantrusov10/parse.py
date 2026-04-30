@@ -158,9 +158,29 @@ def upsert_article(article: dict, token: str = ''):
         except urllib.error.HTTPError as e:
             if e.code != 404:
                 raise
-            # Record was visible during search but disappeared by update time; fallback to create.
-            print('PB patch 404, retry as create:', payload.get('slug'))
-    return pb_request('POST', f'/api/collections/{PB_COLLECTION}/records', payload, token=token)
+            # Record exists, but update is unavailable by API rules; keep existing as-is.
+            print('PB patch 404, keep existing record:', payload.get('slug'))
+            return existing
+    try:
+        return pb_request('POST', f'/api/collections/{PB_COLLECTION}/records', payload, token=token)
+    except urllib.error.HTTPError as e:
+        if e.code != 400:
+            raise
+        # Common race/duplicate case: record already exists by slug/canonical_url.
+        print('PB create 400, trying to resolve existing record:', payload.get('slug'))
+        resolved = None
+        try:
+            resolved = find_article_by_url(payload.get('canonical_url', ''), token=token)
+        except Exception:
+            pass
+        if not resolved:
+            try:
+                resolved = find_article_by_slug(payload['slug'], token=token)
+            except Exception:
+                pass
+        if resolved:
+            return resolved
+        raise
 
 
 def fetch_latest_articles(limit: int = 100, token: str = ''):
