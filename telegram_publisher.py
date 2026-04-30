@@ -143,15 +143,18 @@ def _tg_api(method: str, payload: dict):
     return data
 
 
-def _build_caption(article: dict) -> str:
+def _build_caption(article: dict, for_photo: bool = False) -> str:
     title = (article.get("title") or "Без заголовка").strip()
     excerpt = (article.get("excerpt") or "").strip()
     excerpt = html_lib.unescape(excerpt).replace("\xa0", " ")
     excerpt = re.sub(r"\s+", " ", excerpt).strip()
     src = (article.get("src") or "Источник").strip()
     cat = (article.get("cat") or "IT-продажи").strip()
-    excerpt = excerpt[:360] + ("…" if len(excerpt) > 360 else "")
+    excerpt_limit = 180 if for_photo else 360
+    excerpt = excerpt[:excerpt_limit] + ("…" if len(excerpt) > excerpt_limit else "")
     commentary = _ai_editor_comment(article) or _editor_comment(article)
+    if for_photo and len(commentary) > 140:
+        commentary = commentary[:140].rstrip(" ,.;:") + "…"
     opener = _editor_opener(article)
     read_more_url = (article.get("url") or "").strip()
     opener = html_lib.escape(opener)
@@ -167,7 +170,7 @@ def _build_caption(article: dict) -> str:
         f"{excerpt}\n\n"
         f"<b>Категория:</b> {cat}\n"
         f"<b>Источник:</b> {src}\n\n"
-        f"<b>Что это значит на практике:</b> {commentary}\n\n"
+        f"<b>Комментарий от команды NewLevel:</b> {commentary}\n\n"
         f"Читать полностью: {read_more_url}"
     )
 
@@ -297,6 +300,9 @@ def _openrouter_generate_image(article: dict) -> str:
             )
             with urllib.request.urlopen(req, timeout=60) as resp:
                 raw = resp.read().decode("utf-8")
+            if raw.lstrip().lower().startswith("<!doctype html"):
+                # OpenRouter account/endpoint returned web app HTML instead of JSON API.
+                return ""
             data = json.loads(raw or "{}")
             arr = data.get("data") or []
             if not arr:
@@ -414,7 +420,8 @@ def publish_article(article: dict, relevance_score: int = 0):
     if not _daily_guard_ok():
         return False
 
-    caption = _build_caption(article)
+    caption = _build_caption(article, for_photo=False)
+    photo_caption = _build_caption(article, for_photo=True)
     img = _openrouter_generate_image(article) if ENABLE_IMAGES else ""
     if ENABLE_IMAGES and not img and not IMG_STRICT_OPENROUTER:
         img = _pollinations_fallback_image(article)
@@ -423,7 +430,7 @@ def publish_article(article: dict, relevance_score: int = 0):
     try:
         if img:
             try:
-                res = _send_photo(caption, img)
+                res = _send_photo(photo_caption, img)
                 sent = bool(res and res.get("ok"))
             except Exception as e:
                 print("TG PHOTO WARN:", e)
