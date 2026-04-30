@@ -75,11 +75,14 @@ CATEGORY_RULES = {
             'контент-маркетинг', 'performance marketing', 'demand generation',
             'лидогенерац', 'email-маркетинг', 'abm', 'account based marketing',
             'unit-экономик', 'go-to-market', 'gtm стратегия', 'продуктовый маркетинг',
-            'воронка маркетинга', 'retention', 'churn', 'cac', 'ltv'
+            'воронка маркетинга', 'retention', 'churn', 'cac', 'ltv',
+            'маркетплейс', 'потребительский спрос', 'омниканальные продажи',
+            'digital marketing', 'бренд-стратегия'
         ],
         'words': [
             'маркетинг', 'бренд', 'аудитория', 'позиционирован', 'конверси',
-            'трафик', 'контент', 'охват', 'креатив', 'вебинар', 'кампан'
+            'трафик', 'контент', 'охват', 'креатив', 'вебинар', 'кампан',
+            'реклама', 'ритейл', 'маркетплейс', 'продвижен'
         ]
     },
     'IT-продажи': {
@@ -91,7 +94,7 @@ CATEGORY_RULES = {
             'квалификация лида', 'длинные сделки'
         ],
         'words': [
-            'crm', 'продаж', 'лид', 'сделк', 'воронк', 'клиент', 'аккаунт',
+            'crm', 'лид', 'сделк', 'воронк',
             'b2b', 'saas', 'kpi', 'кп', 'пресейл', 'upsell', 'cross-sell',
             'интегратор', 'дистрибьютор', 'вендор'
         ]
@@ -206,6 +209,9 @@ def recategorize_article(article: dict, fallback_cat: str) -> str:
     second_score = ranked[1][1] if len(ranked) > 1 else 0
     # Avoid random reassignment on weak signals.
     if best_score < 4 or (best_score - second_score) < 2:
+        src = (article.get('src') or '').lower()
+        if src in ('vc.ru', 'ведомости', 'коммерсант', 'lenta.ru'):
+            return 'Маркетинг'
         return fallback_cat
     return best_cat
 
