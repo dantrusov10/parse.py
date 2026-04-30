@@ -6,6 +6,7 @@ import urllib.request
 import urllib.parse
 import xml.etree.ElementTree as ET
 from pb_client import get_token, upsert_article, fetch_all_articles
+from telegram_publisher import publish_article
 
 SOURCES = [
     ('https://habr.com/ru/rss/hub/sales/all/', 'Habr.com', 'IT-продажи'),
@@ -350,6 +351,8 @@ def main():
             ok += 1
             if art.get('cat') in cat_counts:
                 cat_counts[art['cat']] += 1
+            score = calc_relevance_score(art)
+            publish_article(art, relevance_score=score)
             print('PB OK:', art['title'][:80])
         except Exception as e:
             print('PB ERROR:', art['title'][:80], e)
