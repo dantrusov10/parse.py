@@ -1,6 +1,7 @@
 import json
 import os
 import random
+import re
 import urllib.request
 from datetime import datetime
 from pb_client import upsert_article, get_token, slugify, fetch_latest_articles, fetch_all_articles
@@ -60,7 +61,7 @@ def main():
 
     body = json.dumps({'topic': title, 'category': cat, 'secret': WRITER_SECRET}).encode('utf-8')
     req = urllib.request.Request(VERCEL_URL, data=body, headers={'Content-Type': 'application/json'})
-    resp = urllib.request.urlopen(req, timeout=60)
+    resp = urllib.request.urlopen(req, timeout=120)
     result = json.loads(resp.read())
     content = result.get('content', '')
 
@@ -68,11 +69,9 @@ def main():
         print('Ошибка: пустой ответ')
         return
 
-    excerpt = (
-        content.replace('<h3>', '').replace('</h3>', '')
-        .replace('<p>', '').replace('</p>', '')
-        .replace('<strong>', '').replace('</strong>', '')[:220] + '...'
-    )
+    plain = re.sub(r'<[^>]+>', ' ', content)
+    plain = re.sub(r'\s+', ' ', plain).strip()
+    excerpt = (plain[:220] + '…') if len(plain) > 220 else plain
 
     article = {
         'title': title,
