@@ -5,7 +5,7 @@ import html
 import urllib.request
 import urllib.parse
 import xml.etree.ElementTree as ET
-from pb_client import get_token, upsert_article, fetch_all_articles, prune_old_imported_articles
+from pb_client import get_token, upsert_article, fetch_all_articles, prune_old_imported_articles, prune_articles_by_domain
 from telegram_publisher import publish_article
 
 SOURCES = [
@@ -34,6 +34,7 @@ PING_SITEMAP_URLS = os.getenv(
     'https://yandex.ru/ping?sitemap={sitemap},https://www.google.com/ping?sitemap={sitemap}'
 )
 RETENTION_DAYS = int(os.getenv('ARTICLE_RETENTION_DAYS', '180'))
+BLOCKED_SOURCE_DOMAINS = [x.strip().lower() for x in os.getenv('BLOCKED_SOURCE_DOMAINS', 'kommersant.ru').split(',') if x.strip()]
 
 INCLUDE_KEYWORDS = [
     'crm', 'b2b', 'продаж', 'продажи', 'тендер', 'лид', 'воронк', 'ai',
@@ -360,6 +361,11 @@ def main():
 
     # compatibility snapshot for current site until frontend is switched fully
     try:
+        blocked_deleted = 0
+        for domain in BLOCKED_SOURCE_DOMAINS:
+            blocked_deleted += prune_articles_by_domain(token=token, domain_substring=domain, status='published', max_delete=1000)
+        if blocked_deleted:
+            print('PB source cleanup:', blocked_deleted, 'blocked-source articles removed')
         pruned = prune_old_imported_articles(token=token, older_than_days=RETENTION_DAYS, max_delete=500)
         if pruned:
             print('PB retention cleanup:', pruned, 'old imported articles removed')

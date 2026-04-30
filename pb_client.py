@@ -236,3 +236,25 @@ def prune_old_imported_articles(token: str = '', older_than_days: int = 180, max
         except Exception as e:
             print('PB prune warning:', item.get('id'), e)
     return deleted
+
+
+def prune_articles_by_domain(token: str = '', domain_substring: str = '', status: str = 'published', max_delete: int = 1000):
+    needle = (domain_substring or '').strip().lower()
+    if not needle:
+        return 0
+    deleted = 0
+    items = fetch_all_articles(token=token, per_page=200)
+    for item in items:
+        if deleted >= max_delete:
+            break
+        if status and (item.get('status') or '').strip().lower() != status.strip().lower():
+            continue
+        url = (item.get('canonical_url') or '').strip().lower()
+        if needle not in url:
+            continue
+        try:
+            pb_request('DELETE', f'/api/collections/{PB_COLLECTION}/records/{item["id"]}', token=token)
+            deleted += 1
+        except Exception as e:
+            print('PB prune-domain warning:', item.get('id'), e)
+    return deleted
