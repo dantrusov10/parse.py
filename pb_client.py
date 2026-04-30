@@ -4,6 +4,7 @@ import re
 import hashlib
 import urllib.parse
 import urllib.request
+import urllib.error
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
@@ -104,7 +105,7 @@ def get_token() -> str:
 
 
 def find_article_by_slug(slug: str, token: str = ''):
-    flt = urllib.parse.quote(f'slug="{slug}"')
+    flt = urllib.parse.quote(f'slug="{slug}"', safe='')
     data = pb_request('GET', f'/api/collections/{PB_COLLECTION}/records?filter={flt}&perPage=1', token=token)
     items = data.get('items', [])
     return items[0] if items else None
@@ -113,7 +114,7 @@ def find_article_by_slug(slug: str, token: str = ''):
 def find_article_by_url(url: str, token: str = ''):
     if not url:
         return None
-    flt = urllib.parse.quote(f'canonical_url="{url}"')
+    flt = urllib.parse.quote(f'canonical_url="{url}"', safe='')
     data = pb_request('GET', f'/api/collections/{PB_COLLECTION}/records?filter={flt}&perPage=1', token=token)
     items = data.get('items', [])
     return items[0] if items else None
@@ -141,11 +142,24 @@ def build_article_payload(article: dict) -> dict:
 
 def upsert_article(article: dict, token: str = ''):
     payload = build_article_payload(article)
-    existing = find_article_by_url(payload.get('canonical_url', ''), token=token)
+    existing = None
+    try:
+        existing = find_article_by_url(payload.get('canonical_url', ''), token=token)
+    except Exception as e:
+        print('PB find by URL warning:', e)
     if not existing:
-        existing = find_article_by_slug(payload['slug'], token=token)
+        try:
+            existing = find_article_by_slug(payload['slug'], token=token)
+        except Exception as e:
+            print('PB find by slug warning:', e)
     if existing:
-        return pb_request('PATCH', f'/api/collections/{PB_COLLECTION}/records/{existing["id"]}', payload, token=token)
+        try:
+            return pb_request('PATCH', f'/api/collections/{PB_COLLECTION}/records/{existing["id"]}', payload, token=token)
+        except urllib.error.HTTPError as e:
+            if e.code != 404:
+                raise
+            # Record was visible during search but disappeared by update time; fallback to create.
+            print('PB patch 404, retry as create:', payload.get('slug'))
     return pb_request('POST', f'/api/collections/{PB_COLLECTION}/records', payload, token=token)
 
 
