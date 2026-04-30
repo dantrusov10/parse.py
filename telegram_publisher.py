@@ -154,6 +154,13 @@ def _build_caption(article: dict) -> str:
     commentary = _ai_editor_comment(article) or _editor_comment(article)
     opener = _editor_opener(article)
     read_more_url = (article.get("url") or "").strip()
+    opener = html_lib.escape(opener)
+    title = html_lib.escape(title)
+    excerpt = html_lib.escape(excerpt)
+    src = html_lib.escape(src)
+    cat = html_lib.escape(cat)
+    commentary = html_lib.escape(commentary)
+    read_more_url = html_lib.escape(read_more_url)
     return (
         f"{opener}\n"
         f"<b>{title}</b>\n\n"
