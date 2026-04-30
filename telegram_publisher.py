@@ -422,8 +422,12 @@ def publish_article(article: dict, relevance_score: int = 0):
     sent = False
     try:
         if img:
-            res = _send_photo(caption, img)
-            sent = bool(res and res.get("ok"))
+            try:
+                res = _send_photo(caption, img)
+                sent = bool(res and res.get("ok"))
+            except Exception as e:
+                print("TG PHOTO WARN:", e)
+                sent = False
         if not sent:
             _tg_api(
                 "sendMessage",
