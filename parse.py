@@ -225,13 +225,19 @@ def write_news_json_snapshot(items):
         return
     simplified = []
     for x in items:
+        fallback_cat = x.get('cat') or 'IT-продажи'
+        computed_cat = recategorize_article({
+            'title': x.get('title') or '',
+            'excerpt': x.get('excerpt') or '',
+            'body': x.get('content') or x.get('body') or '',
+        }, fallback_cat)
         simplified.append({
             'title': x.get('title'),
             'url': x.get('url'),
             'excerpt': x.get('excerpt'),
             'date': x.get('published_at') or x.get('date'),
             'src': x.get('src', 'NewLevel CRM'),
-            'cat': x.get('cat', 'IT-продажи'),
+            'cat': computed_cat,
             'body': x.get('content') or x.get('body'),
         })
     os.makedirs(os.path.dirname(NEWS_JSON_PATH), exist_ok=True)
