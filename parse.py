@@ -21,7 +21,7 @@ SOURCES = [
     ('https://www.it-world.ru/rss/news.xml', 'IT World', 'IT-продажи'),
     ('https://lenta.ru/rss/news', 'Lenta.ru', 'Маркетинг'),
     ('https://ria.ru/export/rss2/archive/index.xml', 'РИА Новости', 'Маркетинг'),
-    ('https://www.kommersant.ru/RSS/news.xml', 'Коммерсант', 'Маркетинг'),
+    ('https://www.comnews.ru/rss', 'ComNews', 'IT-продажи'),
 ]
 
 NEWS_JSON_PATH = os.getenv('NEWS_JSON_PATH', '/var/www/nwlvl/news.json')

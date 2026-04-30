@@ -39,7 +39,7 @@ SIMILAR_STORE = os.getenv("TELEGRAM_SIMILAR_STORE", "/var/tmp/newlevel_tg_simila
 SIMILARITY_THRESHOLD = float(os.getenv("TG_SIMILARITY_THRESHOLD", "0.86"))
 WHITELIST_RAW = os.getenv(
     "TG_SOURCE_WHITELIST",
-    "habr.com,vc.ru,cnews,ведомости,it world,kommersant,ria,lenta,newlevel"
+    "habr.com,vc.ru,cnews,comnews,ведомости,it world,ria,lenta,newlevel"
 ).strip().lower()
 WHITELIST = [x.strip() for x in WHITELIST_RAW.split(",") if x.strip()]
 
