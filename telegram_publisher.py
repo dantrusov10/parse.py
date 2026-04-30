@@ -3,6 +3,7 @@ import json
 import os
 import re
 import time
+import html as html_lib
 import urllib.parse
 import urllib.request
 from datetime import datetime
@@ -129,16 +130,33 @@ def _tg_api(method: str, payload: dict):
 def _build_caption(article: dict) -> str:
     title = (article.get("title") or "Без заголовка").strip()
     excerpt = (article.get("excerpt") or "").strip()
+    excerpt = html_lib.unescape(excerpt).replace("\xa0", " ")
+    excerpt = re.sub(r"\s+", " ", excerpt).strip()
     src = (article.get("src") or "Источник").strip()
     cat = (article.get("cat") or "IT-продажи").strip()
-    excerpt = excerpt[:260] + ("…" if len(excerpt) > 260 else "")
+    excerpt = excerpt[:360] + ("…" if len(excerpt) > 360 else "")
+    commentary = _editor_comment(article)
     return (
         f"<b>{title}</b>\n\n"
         f"{excerpt}\n\n"
         f"<b>Категория:</b> {cat}\n"
         f"<b>Источник:</b> {src}\n\n"
-        f"<i>{STYLE}</i>"
+        f"<b>Что это значит на практике:</b> {commentary}"
     )
+
+
+def _editor_comment(article: dict) -> str:
+    cat = (article.get("cat") or "").strip()
+    title = (article.get("title") or "").strip().lower()
+    if cat == "ИИ":
+        return "проверьте, можно ли внедрить это в ваши ежедневные процессы продаж и поддержки без долгого пилота."
+    if cat == "Маркетинг":
+        return "оцените влияние на лидогенерацию и стоимость привлечения, а не только на охват."
+    if cat == "Тендеры":
+        return "сверьте требования и сроки заранее: тут чаще всего теряются сделки на этапе подготовки."
+    if "crm" in title or "продаж" in title:
+        return "ищите, как эта практика сократит цикл сделки и повысит предсказуемость воронки."
+    return "разберите, как это применить в вашем процессе уже на этой неделе и какой KPI это должно улучшить."
 
 
 def _image_prompt(article: dict) -> str:
@@ -192,6 +210,21 @@ def _openrouter_generate_image(article: dict) -> str:
     return ""
 
 
+def _pollinations_fallback_image(article: dict) -> str:
+    title = (article.get("title") or "").strip()
+    cat = (article.get("cat") or "IT-продажи").strip()
+    prompt = (
+        "futuristic editorial illustration, dark blue cyber background, "
+        "clean composition, no text, no watermark, "
+        f"category {cat}, topic {title}"
+    )
+    return (
+        "https://image.pollinations.ai/prompt/"
+        + urllib.parse.quote(prompt, safe="")
+        + "?width=1536&height=1024&model=flux&nologo=true"
+    )
+
+
 def _read_url_or_path_data(url_or_path: str):
     if not url_or_path:
         return None
@@ -237,6 +270,8 @@ def publish_article(article: dict, relevance_score: int = 0):
 
     caption = _build_caption(article)
     img = _openrouter_generate_image(article) if ENABLE_IMAGES else ""
+    if ENABLE_IMAGES and not img:
+        img = _pollinations_fallback_image(article)
 
     sent = False
     try:
