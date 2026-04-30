@@ -44,6 +44,61 @@ EXCLUDE_KEYWORDS = [
     'обстрел', 'нхл', 'футбол', 'хоккей', 'пожар', 'землетряс', 'криминал'
 ]
 
+CATEGORY_RULES = {
+    'Тендеры': {
+        'phrases': [
+            '44-фз', '223-фз', 'госзакупк', 'гос закупк', 'тендерн',
+            'конкурсн процедур', 'электронная площадк', 'закупочная процедур',
+            'техническое задани', 'тендерная документац', 'банковская гаранти',
+            'обеспечение заявк', 'обеспечение исполнени', 'победитель закупки',
+            'гк ростех', 'контур.закупки', 'zakupki.gov.ru'
+        ],
+        'words': [
+            'тендер', 'закупк', 'аукцион', 'конкурс', 'котиров', 'фз-44',
+            'фз-223', 'заказчик', 'поставщик', 'лот', 'эцп', 'рнп'
+        ]
+    },
+    'ИИ': {
+        'phrases': [
+            'искусственный интеллект', 'машинное обучение', 'нейронн', 'llm',
+            'large language model', 'генеративн', 'prompt engineering',
+            'ai-ассистент', 'ai ассистент', 'ai copilot', 'computer vision',
+            'natural language processing', 'nlp', 'предиктивная аналитика',
+            'рекомендательная система'
+        ],
+        'words': [
+            'ии', 'ai', 'ml', 'gpt', 'модель', 'автоматизац', 'алгоритм',
+            'инференс', 'fine-tuning', 'файнтюнинг'
+        ]
+    },
+    'Маркетинг': {
+        'phrases': [
+            'контент-маркетинг', 'performance marketing', 'demand generation',
+            'лидогенерац', 'email-маркетинг', 'abm', 'account based marketing',
+            'unit-экономик', 'go-to-market', 'gtm стратегия', 'продуктовый маркетинг',
+            'воронка маркетинга', 'retention', 'churn', 'cac', 'ltv'
+        ],
+        'words': [
+            'маркетинг', 'бренд', 'аудитория', 'позиционирован', 'конверси',
+            'трафик', 'контент', 'охват', 'креатив', 'вебинар', 'кампан'
+        ]
+    },
+    'IT-продажи': {
+        'phrases': [
+            'b2b продажи', 'корпоративные продажи', 'отдел продаж',
+            'pipeline management', 'sales pipeline', 'sales ops',
+            'crm-система', 'crm система', 'коммерческое предложени',
+            'цикл сделки', 'win rate', 'sales forecast', 'управление сделк',
+            'квалификация лида', 'длинные сделки'
+        ],
+        'words': [
+            'crm', 'продаж', 'лид', 'сделк', 'воронк', 'клиент', 'аккаунт',
+            'b2b', 'saas', 'kpi', 'кп', 'пресейл', 'upsell', 'cross-sell',
+            'интегратор', 'дистрибьютор', 'вендор'
+        ]
+    },
+}
+
 
 def strip_html(text: str) -> str:
     return re.sub('<[^>]+>', '', text or '')
@@ -117,7 +172,7 @@ def parse_feed(url, src, cat):
 
 
 def calc_relevance_score(article: dict) -> int:
-    text = f"{article.get('title', '')} {article.get('excerpt', '')}".lower()
+    text = f"{article.get('title', '')} {article.get('excerpt', '')} {strip_html(article.get('body', ''))}".lower()
     score = 0
     for kw in INCLUDE_KEYWORDS:
         if kw in text:
@@ -128,6 +183,32 @@ def calc_relevance_score(article: dict) -> int:
     if article.get('cat') in ('IT-продажи', 'ИИ', 'Тендеры'):
         score += 2
     return score
+
+
+def score_category(text: str, category: str) -> int:
+    rules = CATEGORY_RULES.get(category, {})
+    score = 0
+    for phrase in rules.get('phrases', []):
+        if phrase in text:
+            score += 5
+    for word in rules.get('words', []):
+        if word in text:
+            score += 2
+    return score
+
+
+def recategorize_article(article: dict, fallback_cat: str) -> str:
+    text = f"{article.get('title', '')} {article.get('excerpt', '')} {strip_html(article.get('body', ''))}".lower()
+    ranked = []
+    for cat in CATEGORY_RULES.keys():
+        ranked.append((cat, score_category(text, cat)))
+    ranked.sort(key=lambda x: x[1], reverse=True)
+    best_cat, best_score = ranked[0]
+    second_score = ranked[1][1] if len(ranked) > 1 else 0
+    # Avoid random reassignment on weak signals.
+    if best_score < 4 or (best_score - second_score) < 2:
+        return fallback_cat
+    return best_cat
 
 
 def is_quality_article(article: dict) -> bool:
@@ -235,12 +316,13 @@ def main():
     seen = set()
     parsed = []
 
-    for url, src, cat in SOURCES:
+    for url, src, fallback_cat in SOURCES:
         try:
-            for article in parse_feed(url, src, cat):
+            for article in parse_feed(url, src, fallback_cat):
                 if article['url'] in seen:
                     continue
                 seen.add(article['url'])
+                article['cat'] = recategorize_article(article, fallback_cat)
                 if not is_quality_article(article):
                     continue
                 parsed.append(article)
@@ -250,10 +332,13 @@ def main():
     parsed.sort(key=calc_relevance_score, reverse=True)
 
     ok = 0
+    cat_counts = {'IT-продажи': 0, 'Маркетинг': 0, 'ИИ': 0, 'Тендеры': 0}
     for art in parsed:
         try:
             upsert_article(art, token=token)
             ok += 1
+            if art.get('cat') in cat_counts:
+                cat_counts[art['cat']] += 1
             print('PB OK:', art['title'][:80])
         except Exception as e:
             print('PB ERROR:', art['title'][:80], e)
@@ -271,6 +356,7 @@ def main():
         print('Snapshot error:', e)
 
     print('DONE', ok, 'articles upserted')
+    print('CATEGORY DISTRIBUTION:', cat_counts)
 
 
 if __name__ == '__main__':
