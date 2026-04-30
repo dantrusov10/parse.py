@@ -1,6 +1,9 @@
 import base64
+import difflib
+import hashlib
 import json
 import os
+import random
 import re
 import time
 import html as html_lib
@@ -20,11 +23,20 @@ ENABLE_IMAGES = os.getenv("TG_ENABLE_IMAGES", "1").strip().lower() not in ("0", 
 
 IMG_PROVIDER = os.getenv("IMG_PROVIDER", "").strip().lower()
 IMG_API_KEY = os.getenv("IMG_API_KEY", "").strip()
-IMG_MODEL = os.getenv("IMG_MODEL", "google/gemini-2.5-flash-image-preview").strip()
+IMG_MODEL = os.getenv("IMG_MODEL", "openai/gpt-image-1").strip()
 IMG_FALLBACK_MODELS = [x.strip() for x in os.getenv("IMG_FALLBACK_MODELS", "").split(",") if x.strip()]
+IMG_SIZE = os.getenv("IMG_SIZE", "1536x1024").strip()
+IMG_STRICT_OPENROUTER = os.getenv("IMG_STRICT_OPENROUTER", "0").strip().lower() in ("1", "true", "yes")
 
 SENT_STORE = os.getenv("TELEGRAM_SENT_STORE", "/var/tmp/newlevel_tg_sent.json")
 DAILY_STORE = os.getenv("TELEGRAM_DAILY_STORE", "/var/tmp/newlevel_tg_daily.json")
+SIMILAR_STORE = os.getenv("TELEGRAM_SIMILAR_STORE", "/var/tmp/newlevel_tg_similar.json")
+SIMILARITY_THRESHOLD = float(os.getenv("TG_SIMILARITY_THRESHOLD", "0.86"))
+WHITELIST_RAW = os.getenv(
+    "TG_SOURCE_WHITELIST",
+    "habr.com,vc.ru,cnews,ведомости,it world,kommersant,ria,lenta,newlevel"
+).strip().lower()
+WHITELIST = [x.strip() for x in WHITELIST_RAW.split(",") if x.strip()]
 
 
 def _load_json(path: str, default):
@@ -136,13 +148,27 @@ def _build_caption(article: dict) -> str:
     cat = (article.get("cat") or "IT-продажи").strip()
     excerpt = excerpt[:360] + ("…" if len(excerpt) > 360 else "")
     commentary = _editor_comment(article)
+    opener = _editor_opener(article)
     return (
+        f"{opener}\n"
         f"<b>{title}</b>\n\n"
         f"{excerpt}\n\n"
         f"<b>Категория:</b> {cat}\n"
         f"<b>Источник:</b> {src}\n\n"
         f"<b>Что это значит на практике:</b> {commentary}"
     )
+
+
+def _editor_opener(article: dict) -> str:
+    cat = (article.get("cat") or "").strip()
+    pool = {
+        "ИИ": ["🤖 Что нового в ИИ", "⚡ Короткий апдейт по ИИ", "🧠 Важный сигнал по ИИ"],
+        "Маркетинг": ["📈 Что происходит в маркетинге", "🎯 Коротко про рост и маркетинг", "📣 Сигнал для маркетинга"],
+        "Тендеры": ["📑 Что меняется в тендерах", "🏛 Коротко по госзакупкам", "🧾 Важный тендерный апдейт"],
+        "IT-продажи": ["💼 Что важно для IT-продаж", "🚀 Сигнал для команды продаж", "📊 Короткий апдейт по B2B-продажам"],
+    }
+    picks = pool.get(cat, ["📰 Короткий апдейт"])
+    return random.choice(picks)
 
 
 def _editor_comment(article: dict) -> str:
@@ -178,13 +204,14 @@ def _openrouter_generate_image(article: dict) -> str:
     for model in models:
         try:
             url = "https://openrouter.ai/api/v1/images/generations"
-            payload = {"model": model, "prompt": prompt, "size": "1536x1024"}
+            payload = {"model": model, "prompt": prompt, "size": IMG_SIZE}
             req = urllib.request.Request(
                 url,
                 data=json.dumps(payload).encode("utf-8"),
                 headers={
                     "Authorization": f"Bearer {IMG_API_KEY}",
                     "Content-Type": "application/json",
+                    "Accept": "application/json",
                     "HTTP-Referer": "https://nwlvl.ru",
                     "X-Title": "NewLevel CRM News Bot",
                 },
@@ -253,11 +280,55 @@ def _send_photo_with_button(caption: str, image_url_or_path: str, read_more_url:
     return None
 
 
+def _normalize_text(text: str) -> str:
+    text = html_lib.unescape(text or "").lower().replace("\xa0", " ")
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"[^a-zа-я0-9\s]", " ", text, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _source_allowed(article: dict) -> bool:
+    src = (article.get("src") or "").lower()
+    url = (article.get("url") or "").lower()
+    if not WHITELIST:
+        return True
+    hay = f"{src} {url}"
+    return any(w in hay for w in WHITELIST)
+
+
+def _too_similar(article: dict) -> bool:
+    title = _normalize_text(article.get("title") or "")
+    excerpt = _normalize_text(article.get("excerpt") or "")
+    curr = f"{title} {excerpt}".strip()
+    if not curr:
+        return False
+    cur_hash = hashlib.sha1(curr.encode("utf-8")).hexdigest()
+    store = _load_json(SIMILAR_STORE, {"items": []})
+    items = list(store.get("items", []))
+    for old in items:
+        old_text = old.get("text", "")
+        if not old_text:
+            continue
+        ratio = difflib.SequenceMatcher(None, curr, old_text).ratio()
+        if ratio >= SIMILARITY_THRESHOLD:
+            print(f"TG SKIP: similar post detected (ratio={ratio:.2f})")
+            return True
+    items.append({"hash": cur_hash, "text": curr, "ts": int(time.time())})
+    store["items"] = items[-500:]
+    _save_json(SIMILAR_STORE, store)
+    return False
+
+
 def publish_article(article: dict, relevance_score: int = 0):
     if not _is_configured():
         return False
     if relevance_score < MIN_SCORE:
         print(f"TG SKIP: score {relevance_score} < {MIN_SCORE}")
+        return False
+    if not _source_allowed(article):
+        print("TG SKIP: source is not in whitelist")
+        return False
+    if _too_similar(article):
         return False
     url = (article.get("url") or "").strip()
     if not url:
@@ -270,7 +341,7 @@ def publish_article(article: dict, relevance_score: int = 0):
 
     caption = _build_caption(article)
     img = _openrouter_generate_image(article) if ENABLE_IMAGES else ""
-    if ENABLE_IMAGES and not img:
+    if ENABLE_IMAGES and not img and not IMG_STRICT_OPENROUTER:
         img = _pollinations_fallback_image(article)
 
     sent = False
