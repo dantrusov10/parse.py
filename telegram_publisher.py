@@ -3,7 +3,6 @@ import difflib
 import hashlib
 import json
 import os
-import random
 import re
 import time
 import html as html_lib
@@ -30,7 +29,7 @@ IMG_SIZE = os.getenv("IMG_SIZE", "1536x1024").strip()
 IMG_STRICT_OPENROUTER = os.getenv("IMG_STRICT_OPENROUTER", "0").strip().lower() in ("1", "true", "yes")
 AI_COMMENT_ENABLED = os.getenv("TG_AI_COMMENT_ENABLED", "1").strip().lower() not in ("0", "false", "no")
 AI_COMMENT_MODEL = os.getenv("TG_AI_COMMENT_MODEL", "openai/gpt-4o-mini").strip()
-AI_COMMENT_MAX_CHARS = int(os.getenv("TG_AI_COMMENT_MAX_CHARS", "220"))
+AI_COMMENT_MAX_CHARS = int(os.getenv("TG_AI_COMMENT_MAX_CHARS", "520"))
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip() or IMG_API_KEY
 
 SENT_STORE = os.getenv("TELEGRAM_SENT_STORE", "/var/tmp/newlevel_tg_sent.json")
@@ -144,119 +143,102 @@ def _tg_api(method: str, payload: dict):
     return data
 
 
-def _build_caption(article: dict, for_photo: bool = False) -> str:
-    def _shorten(text: str, limit: int) -> str:
-        text = (text or "").strip()
-        if len(text) <= limit:
-            return text
-        return text[:limit].rstrip(" ,.;:") + "…"
+def _shorten_plain(text: str, limit: int) -> str:
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip(" ,.;:") + "…"
 
+
+def _normalize_commentary(text: str) -> str:
+    text = (text or "").strip()
+    parts = [re.sub(r"[ \t]+", " ", p).strip() for p in text.split("\n\n")]
+    parts = [p for p in parts if p]
+    text = "\n\n".join(parts)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+def _build_caption(article: dict, for_photo: bool = False) -> str:
+    """vc.ru-style: заголовок + тема + только редакционный комментарий + ссылка (без анонса статьи)."""
     title = (article.get("title") or "Без заголовка").strip()
-    excerpt = (article.get("excerpt") or "").strip()
-    excerpt = html_lib.unescape(excerpt).replace("\xa0", " ")
-    excerpt = re.sub(r"\s+", " ", excerpt).strip()
     src = (article.get("src") or "Источник").strip()
     cat = (article.get("cat") or "IT-продажи").strip()
-    excerpt_limit = 120 if for_photo else 360
-    excerpt = _shorten(excerpt, excerpt_limit)
-    commentary = _ai_editor_comment(article) or _editor_comment(article)
-    opener = _editor_opener(article)
+    commentary = _normalize_commentary(_ai_editor_comment(article) or _editor_comment(article))
     read_more_url = (article.get("url") or "").strip()
-    opener = html_lib.escape(opener)
-    title = html_lib.escape(title)
-    excerpt = html_lib.escape(excerpt)
-    src = html_lib.escape(src)
-    cat = html_lib.escape(cat)
-    commentary = html_lib.escape(commentary)
-    read_more_url = html_lib.escape(read_more_url)
-    def _compose(curr_excerpt: str, curr_commentary: str, curr_title: str, include_opener: bool = True) -> str:
-        head = f"{opener}\n" if include_opener else ""
+
+    title_e = html_lib.escape(title)
+    src_e = html_lib.escape(src)
+    cat_e = html_lib.escape(cat)
+    commentary_e = html_lib.escape(commentary)
+    read_more_url_e = html_lib.escape(read_more_url)
+
+    def _compose(curr_title: str, curr_commentary: str, url_e: str, url_raw: str) -> str:
+        link = f'<a href="{url_raw}">{url_e}</a>' if url_raw else url_e
         return (
-            f"{head}"
             f"<b>{curr_title}</b>\n\n"
-            f"{curr_excerpt}\n\n"
-            f"<b>Категория:</b> {cat}\n"
-            f"<b>Источник:</b> {src}\n\n"
-            f"<b>Комментарий от команды NewLevel:</b> {curr_commentary}\n\n"
-            f"Читать полностью: {read_more_url}"
+            f"<i>{cat_e} · {src_e}</i>\n\n"
+            f"{curr_commentary}\n\n"
+            f"{link}"
         )
 
-    caption = _compose(excerpt, commentary, title, include_opener=True)
+    caption = _compose(title_e, commentary_e, read_more_url_e, read_more_url)
     if for_photo:
-        # Telegram caption for photo is limited (about 1024 chars). Keep safe margin.
         max_caption_len = 980
-        # For photo captions keep more room for the team commentary.
-        title_photo = _shorten(title, 96)
-        excerpt_photo = _shorten(excerpt, 60)
-        caption = _compose(excerpt_photo, commentary, title_photo, include_opener=True)
+        title_photo = html_lib.escape(_shorten_plain(title, 200))
         if len(caption) > max_caption_len:
-            # Drop excerpt entirely first, preserving commentary.
-            caption = _compose("", commentary, title_photo, include_opener=True)
+            commentary_short = html_lib.escape(_shorten_plain(commentary, 320))
+            caption = _compose(title_photo, commentary_short, read_more_url_e, read_more_url)
         if len(caption) > max_caption_len:
-            # Then remove opener and trim title harder, still preserving commentary.
-            title_photo = _shorten(title_photo, 64)
-            caption = _compose("", commentary, title_photo, include_opener=False)
+            commentary_short = html_lib.escape(_shorten_plain(commentary, 220))
+            caption = _compose(title_photo, commentary_short, read_more_url_e, read_more_url)
         if len(caption) > max_caption_len:
-            # Last resort: shorten link fragment, not the commentary.
-            short_url = _shorten(read_more_url, 120)
+            short_url = _shorten_plain(read_more_url, 96)
+            short_url_e = html_lib.escape(short_url)
             caption = (
                 f"<b>{title_photo}</b>\n\n"
-                f"<b>Категория:</b> {cat}\n"
-                f"<b>Источник:</b> {src}\n\n"
-                f"<b>Комментарий от команды NewLevel:</b> {commentary}\n\n"
-                f"Читать полностью: {short_url}"
+                f"<i>{cat_e}</i>\n\n"
+                f"{commentary_short}\n\n"
+                f'<a href="{read_more_url}">{short_url_e}</a>'
             )
     return caption
-
-
-def _editor_opener(article: dict) -> str:
-    cat = (article.get("cat") or "").strip()
-    pool = {
-        "ИИ": ["🤖 Что нового в ИИ", "⚡ Короткий апдейт по ИИ", "🧠 Важный сигнал по ИИ"],
-        "Маркетинг": ["📈 Что происходит в маркетинге", "🎯 Коротко про рост и маркетинг", "📣 Сигнал для маркетинга"],
-        "Тендеры": ["📑 Что меняется в тендерах", "🏛 Коротко по госзакупкам", "🧾 Важный тендерный апдейт"],
-        "IT-продажи": ["💼 Что важно для IT-продаж", "🚀 Сигнал для команды продаж", "📊 Короткий апдейт по B2B-продажам"],
-    }
-    picks = pool.get(cat, ["📰 Короткий апдейт"])
-    return random.choice(picks)
 
 
 def _editor_comment(article: dict) -> str:
     cat = (article.get("cat") or "").strip()
     title = (article.get("title") or "").strip().lower()
     if cat == "ИИ":
-        return "проверьте, можно ли внедрить это в ваши ежедневные процессы продаж и поддержки без долгого пилота."
+        return "Нейросети в продажах — не про «магию», а про дисциплину данных. Если заголовок цепляет, читайте, где автор честно проходит по граблям."
     if cat == "Маркетинг":
-        return "оцените влияние на лидогенерацию и стоимость привлечения, а не только на охват."
+        return "Тут либо про деньги и воронку, либо про красивые картинки. Ставьте на первое — остальное приложится."
     if cat == "Тендеры":
-        return "сверьте требования и сроки заранее: тут чаще всего теряются сделки на этапе подготовки."
+        return "Госзакупки любят сюрпризы в сроках и формулировках. Загляните в текст, если готовите КП на этой неделе."
     if "crm" in title or "продаж" in title:
-        return "ищите, как эта практика сократит цикл сделки и повысит предсказуемость воронки."
-    return "разберите, как это применить в вашем процессе уже на этой неделе и какой KPI это должно улучшить."
+        return "CRM-темы быстро превращаются в религию. Ищите в материале один практический рычаг под ваш пайплайн."
+    return "Короткий материал — проверьте, есть ли здесь угол, который можно забрать в планёрку без двухчасового разбора."
 
 
 def _ai_editor_comment(article: dict) -> str:
     if not AI_COMMENT_ENABLED or not OPENROUTER_API_KEY:
         return ""
     title = (article.get("title") or "").strip()
-    excerpt = (article.get("excerpt") or "").strip()
     cat = (article.get("cat") or "IT-продажи").strip()
     src = (article.get("src") or "Источник").strip()
     if not title:
         return ""
 
     system = (
-        "Ты редактор Telegram-канала NewLevel AI. "
-        "Пиши от лица команды NewLevel AI. "
-        "Нужен короткий практический вывод по статье: 1-2 предложения, живой язык, без канцелярита, без списков. "
-        f"Максимум {AI_COMMENT_MAX_CHARS} символов."
+        "Ты редактор Telegram-канала NewLevel CRM в духе vc.ru: плотно, по-человечески, с фокусом на IT/B2B-продажи, маркетинг, ИИ и тендеры. "
+        "Пишешь короткий редакционный комментарий от команды (не дайджест и не пересказ). "
+        "Запрещено: повторять или перефразировать текст новости/анонса, «вода», общие фразы вроде «важно отметить», списки, хэштеги, обращение «дорогие друзья». "
+        "Разрешено: 1–2 абзаца через пустую строку, конкретная мысль, лёгкая ирония если уместна теме, редкий короткий вопрос к читателю. "
+        "Стиль: цепляет, хочется открыть ссылку. Только русский язык. "
+        f"Лимит: не больше {AI_COMMENT_MAX_CHARS} символов (включая пробелы и переносы)."
     )
     user = (
-        f"Категория: {cat}\n"
-        f"Источник: {src}\n"
-        f"Заголовок: {title}\n"
-        f"Анонс: {excerpt[:340]}\n\n"
-        "Сформулируй блок для подписи: 'что это значит на практике' для бизнеса."
+        f"Категория ленты: {cat}\n"
+        f"Источник материала: {src}\n"
+        f"Заголовок (единственный опорный факт — не цитируй его дословно целиком): {title}\n\n"
+        "Напиши только текст комментария для Telegram-подписи. Не добавляй ссылку и не дублируй заголовок."
     )
     payload = {
         "model": AI_COMMENT_MODEL,
@@ -264,8 +246,8 @@ def _ai_editor_comment(article: dict) -> str:
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
-        "temperature": 0.45,
-        "max_tokens": 140,
+        "temperature": 0.72,
+        "max_tokens": 280,
     }
     req = urllib.request.Request(
         "https://openrouter.ai/api/v1/chat/completions",
