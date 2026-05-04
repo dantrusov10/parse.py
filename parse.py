@@ -122,6 +122,21 @@ def normalize_whitespace(text: str) -> str:
     return re.sub(r'\s+', ' ', (text or '')).strip()
 
 
+_TRANSLATION_PREFIX_RE = re.compile(
+    r'^\s*\[\s*Перевод\s*\]\s*[:\-–—\.]?\s*',
+    re.IGNORECASE,
+)
+
+
+def strip_translation_prefix(text: str) -> str:
+    """Убирает служебную метку [Перевод] в начале заголовков/лидов (часто в RSS Habr и др.)."""
+    if not text:
+        return text
+    t = text.strip()
+    t = _TRANSLATION_PREFIX_RE.sub('', t, count=1)
+    return t.strip()
+
+
 def has_blocked_terms(*parts: str) -> bool:
     text = ' '.join([normalize_whitespace(strip_html(p or '')).lower() for p in parts if p is not None])
     if not text:
@@ -170,9 +185,11 @@ def parse_feed(url, src, cat):
     data = urllib.request.urlopen(req, timeout=15).read()
     root = ET.fromstring(data)
     for item in root.findall('.//item')[:ITEMS_PER_SOURCE]:
-        title = (item.findtext('title', '') or '').strip()
+        title = strip_translation_prefix((item.findtext('title', '') or '').strip())
         link = (item.findtext('link', '') or '').strip()
-        full_text = normalize_whitespace(strip_html(item.findtext('description', '')))
+        full_text = strip_translation_prefix(
+            normalize_whitespace(strip_html(item.findtext('description', '')))
+        )
         desc = full_text[:380].strip()
         if len(full_text) > 380:
             desc += '…'

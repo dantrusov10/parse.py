@@ -42,6 +42,19 @@ WHITELIST_RAW = os.getenv(
 ).strip().lower()
 WHITELIST = [x.strip() for x in WHITELIST_RAW.split(",") if x.strip()]
 
+_TRANSLATION_PREFIX_RE = re.compile(
+    r"^\s*\[\s*Перевод\s*\]\s*[:\-–—\.]?\s*",
+    re.IGNORECASE,
+)
+
+
+def _strip_translation_prefix(text: str) -> str:
+    if not text:
+        return text
+    t = text.strip()
+    t = _TRANSLATION_PREFIX_RE.sub("", t, count=1)
+    return t.strip()
+
 
 def _load_json(path: str, default):
     try:
@@ -160,10 +173,12 @@ def _normalize_commentary(text: str) -> str:
 
 def _build_caption(article: dict, for_photo: bool = False) -> str:
     """vc.ru-style: заголовок + тема + только редакционный комментарий + ссылка (без анонса статьи)."""
-    title = (article.get("title") or "Без заголовка").strip()
+    title = _strip_translation_prefix((article.get("title") or "Без заголовка").strip())
     src = (article.get("src") or "Источник").strip()
     cat = (article.get("cat") or "IT-продажи").strip()
-    commentary = _normalize_commentary(_ai_editor_comment(article) or _editor_comment(article))
+    commentary = _normalize_commentary(
+        _strip_translation_prefix(_ai_editor_comment(article) or _editor_comment(article))
+    )
     read_more_url = (article.get("url") or "").strip()
 
     title_e = html_lib.escape(title)
@@ -272,6 +287,7 @@ def _ai_editor_comment(article: dict) -> str:
             .strip()
         )
         content = re.sub(r"\s+", " ", content).strip(" -\n\t")
+        content = _strip_translation_prefix(content)
         if not content:
             return ""
         if len(content) > AI_COMMENT_MAX_CHARS:
@@ -283,7 +299,7 @@ def _ai_editor_comment(article: dict) -> str:
 
 
 def _image_prompt(article: dict) -> str:
-    title = (article.get("title") or "").strip()
+    title = _strip_translation_prefix((article.get("title") or "").strip())
     excerpt = (article.get("excerpt") or "").strip()
     cat = (article.get("cat") or "IT-продажи").strip()
     return (
