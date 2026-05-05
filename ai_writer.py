@@ -73,9 +73,11 @@ def main():
     plain = re.sub(r'\s+', ' ', plain).strip()
     excerpt = (plain[:220] + '…') if len(plain) > 220 else plain
 
+    # Keep one unique "our team" article per day even if topic repeats.
+    daily_slug = f"ai-{slugify(title)}-{datetime.utcnow().strftime('%Y%m%d')}"
     article = {
         'title': title,
-        'slug': 'ai-' + slugify(title),
+        'slug': daily_slug,
         'excerpt': excerpt,
         'content': content,
         'date': datetime.utcnow().isoformat(),
