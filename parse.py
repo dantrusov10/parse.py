@@ -379,7 +379,22 @@ def main():
     token = get_token()
     seen_urls = set()
     seen_titles = set()
+    existing_title_fps = set()
     parsed = []
+
+    # Prevent duplicates across runs: skip if normalized title already exists in PB.
+    try:
+        existing = fetch_all_articles(token=token, per_page=200)
+        for row in existing:
+            slug = (row.get('slug') or '').strip()
+            if slug.startswith('ai-'):
+                continue
+            fp = title_fingerprint(row.get('title', ''))
+            if fp:
+                existing_title_fps.add(fp)
+        print('PRELOAD DEDUPE TITLES:', len(existing_title_fps))
+    except Exception as e:
+        print('PRELOAD DEDUPE WARN:', e)
 
     for url, src, fallback_cat in SOURCES:
         try:
@@ -388,6 +403,8 @@ def main():
                     continue
                 fp = title_fingerprint(article.get('title', ''))
                 if fp and fp in seen_titles:
+                    continue
+                if fp and fp in existing_title_fps:
                     continue
                 seen_urls.add(article['url'])
                 if fp:
@@ -407,6 +424,9 @@ def main():
         try:
             upsert_article(art, token=token)
             ok += 1
+            fp = title_fingerprint(art.get('title', ''))
+            if fp:
+                existing_title_fps.add(fp)
             if art.get('cat') in cat_counts:
                 cat_counts[art['cat']] += 1
             score = calc_relevance_score(art)
