@@ -137,6 +137,15 @@ def strip_translation_prefix(text: str) -> str:
     return t.strip()
 
 
+def title_fingerprint(title: str) -> str:
+    """Light dedupe key for cross-source duplicates with same/near-same headline."""
+    t = strip_translation_prefix(normalize_whitespace(title or '')).lower()
+    t = t.replace('ё', 'е')
+    t = re.sub(r'[^a-zа-я0-9]+', ' ', t, flags=re.IGNORECASE)
+    t = re.sub(r'\s+', ' ', t).strip()
+    return t
+
+
 def has_blocked_terms(*parts: str) -> bool:
     text = ' '.join([normalize_whitespace(strip_html(p or '')).lower() for p in parts if p is not None])
     if not text:
@@ -368,15 +377,21 @@ def ping_search_engines(sitemap_url: str):
 
 def main():
     token = get_token()
-    seen = set()
+    seen_urls = set()
+    seen_titles = set()
     parsed = []
 
     for url, src, fallback_cat in SOURCES:
         try:
             for article in parse_feed(url, src, fallback_cat):
-                if article['url'] in seen:
+                if article['url'] in seen_urls:
                     continue
-                seen.add(article['url'])
+                fp = title_fingerprint(article.get('title', ''))
+                if fp and fp in seen_titles:
+                    continue
+                seen_urls.add(article['url'])
+                if fp:
+                    seen_titles.add(fp)
                 article['cat'] = recategorize_article(article, fallback_cat)
                 if not is_quality_article(article):
                     continue
